@@ -1,19 +1,19 @@
 #This script was designed to be compatible with VSCode.
-If you encounter any errors while running it, make sure all the necessary libraries are installed.
+#If you encounter any errors while running it, make sure all the necessary libraries are installed.
 
 #Now that removing duplicates in Rayyan is a paid feature, they only allow you to remove duplicates one by one,
-considering similarities of up to 50%. Unless you pay for the premium version, you can't change this setting,
-resulting in thousands of duplicates that need to be manually removed. An alternative is to use this script.
-To use it, you first need to have the CSV file of all the articles imported into Rayyan.
-You can obtain this file by downloading it directly from Rayyan, even if you imported your libraries in multiple parts at different times.
-Rayyan allows you to download the entire dataset as a CSV file.
+#considering similarities of up to 50%. Unless you pay for the premium version, you can't change this setting,
+#resulting in thousands of duplicates that need to be manually removed. An alternative is to use this script.
+#To use it, you first need to have the CSV file of all the articles imported into Rayyan.
+#You can obtain this file by downloading it directly from Rayyan, even if you imported your libraries in multiple parts at different times.
+#Rayyan allows you to download the entire dataset as a CSV file.
 
 #The script will remove duplicates, but not based on a similarity percentage, as this would require a lot of processing and take too much time.
-Instead, it uses strategies based on identical regions in the title and abstract.
-This significantly helps in identifying duplicates, leaving only a small number for you to remove manually.
+#Instead, it uses strategies based on identical regions in the title and abstract.
+#This significantly helps in identifying duplicates, leaving only a small number for you to remove manually.
 
 #Additionally, the script splits the output into files of up to 90MB, since Rayyan only allows uploads of files up to 100MB.
-For instance, if you have 200MB of data, the script will return three files, each with a maximum size of 90MB.
+#For instance, if you have 200MB of data, the script will return three files, each with a maximum size of 90MB.
 
 import pandas as pd
 import os
