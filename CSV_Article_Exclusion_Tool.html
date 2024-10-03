@@ -1,0 +1,323 @@
+#This script was developed to address the need to exclude articles in Rayyan that contain specific words in the title, abstract, or keywords.
+#This feature is now paid in the new version of Rayyan.
+#To use this script, you will need the CSV file of your Rayyan articles after you have resolved the duplicates.
+#By downloading THIS CSV (containing only the title, abstract, and author), it will be in the proper format to be recognized by this script.
+#The script will return a CSV file with the excluded articles, and it will also generate a .txt file with information on the number of articles excluded for each word.
+#You can select the exclusion words during the script’s execution.
+
+#Developed by Murilo Porfírio
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Processor</title>
+    <style>
+        #loader {
+            display: none;
+            font-size: 18px;
+            color: blue;
+        }
+        #progressBar {
+            width: 100%;
+            background-color: #f3f3f3;
+            border: 1px solid #000;
+        }
+        #progressBarFill {
+            width: 0%;
+            height: 30px;
+            background-color: #4CAF50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+        table {
+            margin-top: 10px;
+            border-collapse: collapse;
+            width: 50%;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 8px;
+            text-align: center;
+        }
+        #errorMessage {
+            color: red;
+            display: none;
+        }
+        #downloadButton {
+            display: none;
+        }
+        footer {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            font-size: 12px;
+            color: gray;
+        }
+    </style>
+</head>
+<body>
+    <div id="step1">
+        <h2>ATENÇÃO!</h2>
+        <p>Em seguida, será solicitado que você selecione o arquivo CSV. Esse arquivo deve ter sido exportado pelo Rayyan, contendo apenas o Abstract e os autores (Isso pode ser configurado no momento da exportação no Rayyan).</p>
+        <button onclick="nextStep(2)">ENTENDIDO</button>
+    </div>
+
+    <div id="step2" style="display:none;">
+        <h2>AVISO IMPORTANTE!</h2>
+        <p>O script pode gerar mais de um arquivo CSV. Se o arquivo final ultrapassar 80 MB, ele será automaticamente dividido em partes para facilitar o upload no Rayyan, que permite arquivos de até 90 MB.</p>
+        <button onclick="nextStep(3)">ENTENDIDO</button>
+    </div>
+
+    <div id="step3" style="display:none;">
+        <h2>Selecione o arquivo CSV</h2>
+        <input type="file" id="csvFileInput" accept=".csv">
+        <button onclick="processCSV()">Selecionei o arquivo</button>
+    </div>
+
+    <div id="step4" style="display:none;">
+        <h2>Escreva as palavras para exclusão</h2>
+        <p>Escreva as palavras que, se encontradas no abstract, title ou keywords, resultarão na exclusão do artigo. As palavras devem ser separadas por vírgula, como no exemplo: "review, systematic review, mice, mouse, equine".</p>
+        <textarea id="exclusionWords" rows="5" cols="50"></textarea>
+        <button onclick="filterArticles()">INSERI AS PALAVRAS E QUERO CONTINUAR</button>
+    </div>
+
+    <div id="loader">
+        <h2>Processando...</h2>
+        <div id="progressBar">
+            <div id="progressBarFill">0%</div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Linha Atual</th>
+                    <th>% Completo</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td id="currentLine">0</td>
+                    <td id="percentageComplete">0%</td>
+                </tr>
+            </tbody>
+        </table>
+        <p id="errorMessage"></p>
+        <button id="downloadButton" style="display:none;" onclick="manualDownload()">Clique aqui para baixar os arquivos manualmente</button>
+    </div>
+
+    <footer>
+        Autores: Murilo Porfírio, Julia Hailer e Jéssica Ferreira
+    </footer>
+
+    <script>
+        let csvData = null;
+        let exclusionWords = [];
+        let filteredCSV = [];
+        let exclusionCounts = {};
+        const MAX_FILE_SIZE = 80 * 1024 * 1024; // 80MB
+
+        function nextStep(step) {
+            document.getElementById("step" + (step - 1)).style.display = "none";
+            document.getElementById("step" + step).style.display = "block";
+        }
+
+        function processCSV() {
+            const input = document.getElementById('csvFileInput');
+            const file = input.files[0];
+
+            if (!file) {
+                alert("Por favor, selecione um arquivo CSV.");
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                try {
+                    csvData = event.target.result.split("\n").map(row => row.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/));
+                    console.log("CSV carregado com sucesso.");
+                    nextStep(4);
+                } catch (error) {
+                    handleError("Erro ao carregar o arquivo CSV.", error);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function filterArticles() {
+            try {
+                exclusionWords = document.getElementById("exclusionWords").value.split(",").map(word => word.trim().toLowerCase());
+                exclusionWords.forEach(word => exclusionCounts[word] = 0);
+
+                const headers = csvData[0];
+                const abstractIndex = headers.indexOf("abstract");
+                const titleIndex = headers.indexOf("title");
+                const keywordsIndex = headers.indexOf("keywords");
+
+                if (abstractIndex === -1 || titleIndex === -1 || keywordsIndex === -1) {
+                    throw new Error("Colunas 'abstract', 'title' ou 'keywords' não encontradas.");
+                }
+
+                filteredCSV.push(headers); // Manter os headers
+                const totalRows = csvData.length - 1;
+                let processedRows = 0;
+
+                document.getElementById("step4").style.display = "none";
+                document.getElementById("loader").style.display = "block";
+
+                for (let i = 1; i < csvData.length; i++) {
+                    const row = csvData[i];
+                    
+                    // Capturar conteúdo de abstract, title e keywords e remover espaços extras e quebras de linha
+                    const abstract = row[abstractIndex]?.toLowerCase().replace(/[\r\n]+/g, ' ').trim() || "";
+                    const title = row[titleIndex]?.toLowerCase().replace(/[\r\n]+/g, ' ').trim() || "";
+                    const keywords = row[keywordsIndex]?.toLowerCase().replace(/[\r\n]+/g, ' ').trim() || "";
+
+                    // Verificar se há palavras de exclusão no abstract, title ou keywords
+                    let exclude = false;
+                    for (let word of exclusionWords) {
+                        if (abstract.includes(word) || title.includes(word) || keywords.includes(word)) {
+                            exclude = true;
+                            exclusionCounts[word]++;
+                            break; // Excluir a linha e passar para a próxima
+                        }
+                    }
+
+                    if (!exclude) {
+                        filteredCSV.push(row); // Adiciona a linha apenas se não for excluída
+                    }
+
+                    processedRows++;
+                    const percentageComplete = ((processedRows / totalRows) * 100).toFixed(2);
+                    updateProgress(i, percentageComplete);
+                }
+
+                // Iniciar controle de qualidade após filtrar
+                runQualityCheck();
+
+            } catch (error) {
+                handleError("Erro ao processar o CSV.", error);
+            }
+        }
+
+        // Função de controle de qualidade para verificar o arquivo gerado
+        function runQualityCheck() {
+            try {
+                let failedWords = [];
+                for (let i = 1; i < filteredCSV.length; i++) {
+                    const row = filteredCSV[i];
+                    const abstract = row[filteredCSV[0].indexOf("abstract")]?.toLowerCase().replace(/[\r\n]+/g, ' ').trim() || "";
+                    const title = row[filteredCSV[0].indexOf("title")]?.toLowerCase().replace(/[\r\n]+/g, ' ').trim() || "";
+                    const keywords = row[filteredCSV[0].indexOf("keywords")]?.toLowerCase().replace(/[\r\n]+/g, ' ').trim() || "";
+
+                    // Verificar se alguma palavra de exclusão ainda está presente em abstract, title ou keywords
+                    for (let word of exclusionWords) {
+                        if (abstract.includes(word) || title.includes(word) || keywords.includes(word)) {
+                            failedWords.push(`Linha ${i + 1} contém '${word}'`);
+                            break;
+                        }
+                    }
+                }
+
+                if (failedWords.length > 0) {
+                    alert(`Erro de controle de qualidade! As seguintes linhas ainda contêm palavras de exclusão: \n${failedWords.join("\n")}`);
+                } else {
+                    // Se passar no controle de qualidade, salvar o arquivo final
+                    saveFilteredCSV();
+                }
+            } catch (error) {
+                handleError("Erro ao realizar controle de qualidade.", error);
+            }
+        }
+
+        function updateProgress(line, percentage) {
+            document.getElementById("currentLine").innerText = line;
+            document.getElementById("percentageComplete").innerText = `${percentage}%`;
+
+            const progressBarFill = document.getElementById("progressBarFill");
+            progressBarFill.style.width = `${percentage}%`;
+            progressBarFill.innerText = `${percentage}%`;
+        }
+
+        function saveFilteredCSV() {
+            try {
+                const csvContent = filteredCSV.map(e => e.join(",")).join("\n");
+                let partSize = 0;
+                let partCounter = 1;
+                let partData = [];
+
+                // Dividir arquivo baseado no tamanho real (bytes)
+                for (let i = 0; i < filteredCSV.length; i++) {
+                    const row = filteredCSV[i].join(",") + "\n";
+                    const byteLength = new Blob([row], { type: 'text/csv' }).size;
+
+                    if (partSize + byteLength > MAX_FILE_SIZE) {
+                        const partBlob = new Blob([partData.join("")], { type: 'text/csv;charset=utf-8;' });
+                        downloadBlob(partBlob, `filtered_articles_part_${partCounter}.csv`);
+                        partData = [];
+                        partSize = 0;
+                        partCounter++;
+                    }
+
+                    partData.push(row);
+                    partSize += byteLength;
+                }
+
+                // Baixar a última parte do CSV
+                if (partData.length > 0) {
+                    const partBlob = new Blob([partData.join("")], { type: 'text/csv;charset=utf-8;' });
+                    downloadBlob(partBlob, `filtered_articles_part_${partCounter}.csv`);
+                }
+
+                // Gerar o arquivo de relatório
+                let exclusionReport = "";
+                for (const [word, count] of Object.entries(exclusionCounts)) {
+                    exclusionReport += `${word}: ${count} artigos excluídos\n`;
+                }
+
+                const reportBlob = new Blob([exclusionReport], { type: 'text/plain;charset=utf-8;' });
+                downloadBlob(reportBlob, "exclusion_report.txt");
+
+                // Exibir mensagem final e botão para download manual
+                document.getElementById("loader").style.display = "none";
+                document.getElementById("downloadButton").style.display = "block";
+                alert("Processamento finalizado. O download dos arquivos deve iniciar automaticamente. Um arquivo TXT com os detalhes dos artigos excluídos foi incluído.");
+
+            } catch (error) {
+                handleError("Erro ao salvar o arquivo.", error);
+            }
+        }
+
+        function downloadBlob(blob, filename) {
+            try {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                link.click();
+                URL.revokeObjectURL(link.href); // Liberar a memória após o download
+                console.log(`${filename} foi baixado com sucesso.`);
+            } catch (error) {
+                handleError("Erro ao baixar o arquivo.", error);
+            }
+        }
+
+        function handleError(message, error) {
+            console.error(`${message}:`, error);
+            const errorMessageElement = document.getElementById("errorMessage");
+            errorMessageElement.innerText = `${message}: ${error.message}`;
+            errorMessageElement.style.display = "block";
+        }
+
+        function manualDownload() {
+            try {
+                saveFilteredCSV();
+            } catch (error) {
+                handleError("Erro ao realizar o download manual.", error);
+            }
+        }
+    </script>
+</body>
+</html>
